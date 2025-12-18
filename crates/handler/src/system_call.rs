@@ -26,7 +26,7 @@ use crate::{
 use context::{ContextSetters, ContextTr, Evm, JournalTr, TxEnv, inner::LazyEvmStateHandle, result::ExecResultAndState};
 use database_interface::DatabaseCommit;
 use interpreter::{interpreter::EthInterpreter, InterpreterResult};
-use primitives::{address, Address, Bytes, TxKind};
+use primitives::{Address, Bytes, HashMap, TxKind, address};
 use state::{EvmState, LazyEvmState};
 
 /// The system address used for system calls.
@@ -257,7 +257,7 @@ where
     ) -> Result<Self::ExecutionResult, Self::Error> {
         self.system_call_with_caller(caller, system_contract_address, data)
             .map(|output| {
-                let state: std::collections::HashMap<Address, state::Account> = LazyEvmStateHandle(output.state).resolve_full_state(self.db_mut())?;
+                let state: HashMap<Address, state::Account> = LazyEvmStateHandle(output.state).resolve_full_state(self.db_mut())?;
                 self.db_mut().commit(state);
                 Ok(output.result)
             })?
