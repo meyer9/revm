@@ -4,10 +4,8 @@ use bytecode::Bytecode;
 use context_interface::{
     context::{SStoreResult, SelfDestructResult, StateLoad},
     journaled_state::{
-        account::JournaledAccount,
-        entry::{JournalEntryTr, SelfdestructionRevertStatus},
+        AccountLoad, JournalCheckpoint, JournalLoadError, TransferError, account::JournaledAccount, entry::{JournalEntry, JournalEntryTr, SelfdestructionRevertStatus}
     },
-    journaled_state::{AccountLoad, JournalCheckpoint, JournalLoadError, TransferError},
 };
 use core::mem;
 use database_interface::Database;
@@ -357,8 +355,13 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         address: Address,
         balance: U256,
     ) -> Result<(), DB::Error> {
-        let mut account = self.load_account_mut(db, address)?.data;
-        account.incr_balance(balance);
+        if self.state.0.loaded_state.contains_key(&address) {
+            let mut account = self.load_account_mut(db, address)?.data;
+            account.incr_balance(balance);
+        } else {
+            self.state.0.pending_balance_increments.entry(address).and_modify(|addr_bal| *addr_bal = balance.saturating_add(balance)).or_insert(balance);
+            self.journal.push(ENTRY::balance_incremented(address, balance))
+        }
         Ok(())
     }
 

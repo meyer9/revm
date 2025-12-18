@@ -35,6 +35,9 @@ pub trait JournalEntryTr {
     /// Creates a journal entry for when an account's balance is changed.
     fn balance_changed(address: Address, old_balance: U256) -> Self;
 
+    /// Creates a journal entry for when an account's balance is incremented.
+    fn balance_incremented(address: Address, increment_amount: U256) -> Self;
+
     /// Creates a journal entry for when an account's nonce is incremented.
     fn nonce_changed(address: Address) -> Self;
 
@@ -255,6 +258,10 @@ impl JournalEntryTr for JournalEntry {
 
     fn balance_transfer(from: Address, to: Address, balance: U256) -> Self {
         JournalEntry::BalanceTransfer { from, to, balance }
+    }
+
+    fn balance_incremented(address: Address, increment_amount: U256) -> Self {
+        JournalEntry::BalanceIncremented { balance: increment_amount, to: address }
     }
 
     fn account_created(address: Address, is_created_globally: bool) -> Self {
