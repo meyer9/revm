@@ -26,6 +26,7 @@ alloy-eip7702 = { workspace = true, features = ["k256"] }
 alloy-eip2930.workspace = true
 
 # misc
+tracing.workspace = true
 auto_impl.workspace = true
 either.workspace = true
 

@@ -5,9 +5,10 @@
 
 use super::entry::JournalEntryTr;
 use core::ops::Deref;
-use primitives::{Address, B256, KECCAK_EMPTY, U256};
+use primitives::{Address, B256, KECCAK_EMPTY, U256, address};
 use state::{Account, Bytecode};
-use std::vec::Vec;
+use tracing::debug;
+use std::{backtrace::Backtrace, vec::Vec};
 
 /// Journaled account contains both mutable account and journal entries.
 ///
@@ -84,6 +85,9 @@ impl<'a, ENTRY: JournalEntryTr> JournaledAccount<'a, ENTRY> {
     /// Touches the account in all cases.
     #[inline]
     pub fn set_balance(&mut self, balance: U256) {
+        if self.address == address!("0x0000000000000000000000000000000000000006") {
+            debug!("setting balance of 0x0000000000000000000000000000000000000006 to {}: {}", balance, Backtrace::capture());
+        }
         self.touch();
         if self.account.info.balance != balance {
             self.journal_entries.push(ENTRY::balance_changed(

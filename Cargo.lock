@@ -3591,6 +3591,7 @@ dependencies = [
  "revm-primitives",
  "revm-state",
  "serde",
+ "tracing",
 ]
 
 [[package]]
