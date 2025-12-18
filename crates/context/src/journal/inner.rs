@@ -38,6 +38,7 @@ impl LazyEvmStateHandle {
         })
     }
 
+    /// Called to resolve remaining balances that are in pending_balance_increments.
     pub fn resolve_full_state<DB: Database>(&mut self, db: &mut DB) -> Result<EvmState, DB::Error> {
         let mut full_state = HashMap::default();
         // set of keys that exist in both loaded_state and pending_balance_increments
@@ -61,6 +62,21 @@ impl LazyEvmStateHandle {
             full_state.insert(*address, account);
         }
         Ok(full_state)
+    }
+
+    /// Called when an account is loaded from the database.
+    pub fn account_loaded(&mut self, address: Address, loaded_account: Account) -> &mut Account {
+        let mut account = loaded_account.clone();
+        // if account is in pending_balance_increments, add it to the account's balance and mark as touched
+        if let Some(balance_increment) = self.0.pending_balance_increments.get(&address) {
+            account.info.balance = account.info.balance.saturating_add(*balance_increment);
+            account.mark_touch();
+            self.0.pending_balance_increments.remove(&address);
+        }
+        self.0.loaded_state.insert(address, account);
+
+        // return mutable reference to account
+        self.0.loaded_state.get_mut(&address).unwrap()
     }
 }
 
@@ -774,57 +790,53 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     where
         'db: 'a,
     {
-        let (account, is_cold) = match self.state.0.loaded_state.entry(address) {
-            Entry::Occupied(entry) => {
-                let account = entry.into_mut();
+        let (account, is_cold) = if self.state.0.loaded_state.contains_key(&address) {
+            let account = self.state.0.loaded_state.get_mut(&address).unwrap();
+            // skip load if account is cold.
+            let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
 
-                // skip load if account is cold.
-                let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
-
-                if unlikely(is_cold) {
-                    is_cold = self
-                        .warm_addresses
-                        .check_is_cold(&address, skip_cold_load)?;
-
-                    // mark it warm.
-                    account.mark_warm_with_transaction_id(self.transaction_id);
-
-                    // if it is cold loaded and we have selfdestructed locally it means that
-                    // account was selfdestructed in previous transaction and we need to clear its information and storage.
-                    if account.is_selfdestructed_locally() {
-                        account.selfdestruct();
-                        account.unmark_selfdestructed_locally();
-                    }
-                    // unmark locally created
-                    account.unmark_created_locally();
-
-                    // journal loading of cold account.
-                    self.journal.push(ENTRY::account_warmed(address));
-                }
-                (account, is_cold)
-            }
-            Entry::Vacant(vac) => {
-                // Precompiles,  among some other account(access list and coinbase included)
-                // are warm loaded so we need to take that into account
-                let is_cold = self
+            if unlikely(is_cold) {
+                is_cold = self
                     .warm_addresses
                     .check_is_cold(&address, skip_cold_load)?;
 
-                let account = if let Some(account) = db.basic(address)? {
-                    let mut account: Account = account.into();
-                    account.transaction_id = self.transaction_id;
-                    account
-                } else {
-                    Account::new_not_existing(self.transaction_id)
-                };
+                // mark it warm.
+                account.mark_warm_with_transaction_id(self.transaction_id);
+
+                // if it is cold loaded and we have selfdestructed locally it means that
+                // account was selfdestructed in previous transaction and we need to clear its information and storage.
+                if account.is_selfdestructed_locally() {
+                    account.selfdestruct();
+                    account.unmark_selfdestructed_locally();
+                }
+                // unmark locally created
+                account.unmark_created_locally();
 
                 // journal loading of cold account.
-                if is_cold {
-                    self.journal.push(ENTRY::account_warmed(address));
-                }
-
-                (vac.insert(account), is_cold)
+                self.journal.push(ENTRY::account_warmed(address));
             }
+            (account, is_cold)
+        } else {
+            // Precompiles,  among some other account(access list and coinbase included)
+            // are warm loaded so we need to take that into account
+            let is_cold = self
+                .warm_addresses
+                .check_is_cold(&address, skip_cold_load)?;
+
+            let account = if let Some(account) = db.basic(address)? {
+                let mut account: Account = account.into();
+                account.transaction_id = self.transaction_id;
+                account
+            } else {
+                Account::new_not_existing(self.transaction_id)
+            };
+
+            // journal loading of cold account.
+            if is_cold {
+                self.journal.push(ENTRY::account_warmed(address));
+            }
+
+            (self.state.account_loaded(address, account), is_cold)
         };
 
         Ok(StateLoad::new(
