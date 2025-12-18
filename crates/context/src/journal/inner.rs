@@ -10,10 +10,10 @@ use context_interface::{
 use core::mem;
 use database_interface::Database;
 use primitives::{
-    Address, B256, HashMap, HashSet, KECCAK_EMPTY, Log, StorageKey, StorageValue, U256, hardfork::SpecId::{self, *}, hash_map::Entry
+    Address, B256, HashMap, HashSet, KECCAK_EMPTY, Log, StorageKey, StorageValue, U256, hardfork::SpecId::{self, *}, hash_map::Entry, address
 };
 use state::{Account, AccountStatus, EvmState, EvmStorageSlot, LazyEvmState, TransientStorage};
-use std::vec::Vec;
+use std::{backtrace::Backtrace, vec::Vec};
 use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -781,6 +781,10 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
                 is_cold,
             }
         };
+
+        if address == address!("0x0000000000000000000000000000000000000006") {
+            debug!("loading account 0x0000000000000000000000000000000000000006: {}", Backtrace::capture());
+        }
 
         // journal loading of cold account.
         if load.is_cold {

@@ -85,9 +85,6 @@ impl<'a, ENTRY: JournalEntryTr> JournaledAccount<'a, ENTRY> {
     /// Touches the account in all cases.
     #[inline]
     pub fn set_balance(&mut self, balance: U256) {
-        if self.address == address!("0x0000000000000000000000000000000000000006") {
-            debug!("setting balance of 0x0000000000000000000000000000000000000006 to {}: {}", balance, Backtrace::capture());
-        }
         self.touch();
         if self.account.info.balance != balance {
             self.journal_entries.push(ENTRY::balance_changed(
