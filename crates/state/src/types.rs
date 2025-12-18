@@ -13,7 +13,7 @@ pub type EvmStorage = HashMap<StorageKey, EvmStorageSlot>;
 
 /// EvmState that handles incrementing balance lazily to allow for parallel execution.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LazyEvmState {
     /// Loaded state is the state that is loaded from the database.
     #[cfg_attr(feature = "serde", serde(flatten))]
