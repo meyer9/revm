@@ -7,29 +7,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use revm::{
-    context::{
-        journaled_state::{account::JournaledAccount, AccountInfoLoad, JournalLoadError},
-        result::InvalidTransaction,
-        BlockEnv, Cfg, CfgEnv, ContextTr, Evm, LocalContext, TxEnv,
-    },
-    context_interface::{
-        journaled_state::{AccountLoad, JournalCheckpoint, TransferError},
-        result::EVMError,
-        Block, JournalTr, Transaction,
-    },
-    database::InMemoryDB,
-    handler::{
-        instructions::{EthInstructions, InstructionProvider},
-        EthPrecompiles, PrecompileProvider,
-    },
-    inspector::{inspectors::TracerEip3155, JournalExt},
-    interpreter::{
-        interpreter::EthInterpreter, CallInputs, CallOutcome, InterpreterResult, SStoreResult,
-        SelfDestructResult, StateLoad,
-    },
-    primitives::{hardfork::SpecId, Address, HashSet, Log, StorageKey, StorageValue, B256, U256},
-    state::{Account, Bytecode, EvmState},
-    Context, Database, DatabaseCommit, InspectEvm, Inspector, Journal, JournalEntry,
+    Context, Database, DatabaseCommit, InspectEvm, Inspector, Journal, JournalEntry, context::{
+        BlockEnv, Cfg, CfgEnv, ContextTr, Evm, LocalContext, TxEnv, inner::LazyEvmStateHandle, journaled_state::{AccountInfoLoad, JournalLoadError, account::JournaledAccount}, result::InvalidTransaction
+    }, context_interface::{
+        Block, JournalTr, Transaction, journaled_state::{AccountLoad, JournalCheckpoint, TransferError}, result::EVMError
+    }, database::InMemoryDB, handler::{
+        EthPrecompiles, PrecompileProvider, instructions::{EthInstructions, InstructionProvider}
+    }, inspector::{JournalExt, inspectors::TracerEip3155}, interpreter::{
+        CallInputs, CallOutcome, InterpreterResult, SStoreResult, SelfDestructResult, StateLoad, interpreter::EthInterpreter
+    }, primitives::{Address, B256, HashSet, Log, StorageKey, StorageValue, U256, hardfork::SpecId}, state::{Account, Bytecode, EvmState, LazyEvmState}
 };
 use std::{convert::Infallible, fmt::Debug};
 
@@ -59,7 +45,7 @@ impl Backend {
 
 impl JournalTr for Backend {
     type Database = InMemoryDB;
-    type State = EvmState;
+    type State = LazyEvmState;
     type JournaledAccount<'a> = JournaledAccount<'a, InMemoryDB, JournalEntry>;
 
     fn new(database: InMemoryDB) -> Self {
@@ -315,14 +301,6 @@ impl JournalTr for Backend {
 impl JournalExt for Backend {
     fn journal(&self) -> &[JournalEntry] {
         self.journaled_state.journal()
-    }
-
-    fn evm_state(&self) -> &EvmState {
-        self.journaled_state.evm_state()
-    }
-
-    fn evm_state_mut(&mut self) -> &mut EvmState {
-        self.journaled_state.evm_state_mut()
     }
 }
 
@@ -599,10 +577,12 @@ where
 
     let state = evm.inspect_tx(tx)?.state;
 
+    let state = LazyEvmStateHandle(state).resolve_full_state(&mut backend.journaled_state.database)?;
+
     // Persist the changes to the original backend.
     backend.journaled_state.database.commit(state);
     update_state(
-        &mut backend.journaled_state.inner.state,
+        &mut backend.journaled_state.inner.state.0.loaded_state,
         &mut backend.journaled_state.database,
     )?;
 

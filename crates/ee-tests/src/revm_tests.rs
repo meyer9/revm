@@ -49,7 +49,7 @@ fn test_selfdestruct_multi_tx() {
         .transact_one(TxEnv::builder_for_bench().build_fill())
         .unwrap();
 
-    let destroyed_acc = evm.ctx.journal_mut().state.get_mut(&BENCH_TARGET).unwrap();
+    let destroyed_acc = evm.ctx.journal_mut().state.0.loaded_state.get_mut(&BENCH_TARGET).unwrap();
 
     // balance got transferred to 0x0000..00FFFF
     assert_eq!(destroyed_acc.info.balance, U256::ZERO);
@@ -64,7 +64,7 @@ fn test_selfdestruct_multi_tx() {
         .transact_one(TxEnv::builder_for_bench().nonce(1).build_fill())
         .unwrap();
 
-    let destroyed_acc = evm.ctx.journal_mut().state.get_mut(&BENCH_TARGET).unwrap();
+    let destroyed_acc = evm.ctx.journal_mut().state.0.loaded_state.get_mut(&BENCH_TARGET).unwrap();
 
     assert_eq!(destroyed_acc.info.code_hash, KECCAK_EMPTY);
     assert_eq!(destroyed_acc.info.nonce, 0);
@@ -105,8 +105,8 @@ fn test_multi_tx_create() {
     let created_acc = evm
         .ctx
         .journal_mut()
-        .state
-        .get_mut(&created_address)
+        .state.0
+        .loaded_state.get_mut(&created_address)
         .unwrap();
 
     assert_eq!(
@@ -129,8 +129,8 @@ fn test_multi_tx_create() {
     let created_acc = evm
         .ctx
         .journal_mut()
-        .state
-        .get_mut(&created_address)
+        .state.0
+        .loaded_state.get_mut(&created_address)
         .unwrap();
 
     // reset nonce to trigger create on same address.
@@ -147,6 +147,7 @@ fn test_multi_tx_create() {
     evm.ctx
         .journal_mut()
         .state
+        .0.loaded_state
         .get_mut(&BENCH_CALLER)
         .unwrap()
         .info
@@ -170,7 +171,8 @@ fn test_multi_tx_create() {
         .ctx
         .journal_mut()
         .state
-        .get_mut(&created_address)
+        .0
+        .loaded_state.get_mut(&created_address)
         .unwrap();
 
     assert_eq!(

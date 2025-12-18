@@ -2,15 +2,14 @@ use crate::{
     frame::EthFrame, instructions::InstructionProvider, Handler, MainnetHandler, PrecompileProvider,
 };
 use context::{
-    result::{
+    Block, ContextSetters, ContextTr, Database, Evm, JournalTr, Transaction, inner::LazyEvmStateHandle, result::{
         EVMError, ExecResultAndState, ExecutionResult, HaltReason, InvalidTransaction,
         ResultAndState, ResultVecAndState, TransactionIndexedError,
-    },
-    Block, ContextSetters, ContextTr, Database, Evm, JournalTr, Transaction,
+    }
 };
 use database_interface::DatabaseCommit;
 use interpreter::{interpreter::EthInterpreter, InterpreterResult};
-use state::EvmState;
+use state::{EvmState, LazyEvmState};
 use std::vec::Vec;
 
 /// Type alias for the result of transact_many_finalize to reduce type complexity.
@@ -173,12 +172,12 @@ pub trait ExecuteCommitEvm: ExecuteEvm {
 impl<CTX, INSP, INST, PRECOMPILES> ExecuteEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
-    CTX: ContextTr<Journal: JournalTr<State = EvmState>> + ContextSetters,
+    CTX: ContextTr<Journal: JournalTr<State = LazyEvmState>> + ContextSetters,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
 {
     type ExecutionResult = ExecutionResult<HaltReason>;
-    type State = EvmState;
+    type State = LazyEvmState;
     type Error = EVMError<<CTX::Db as Database>::Error, InvalidTransaction>;
     type Tx = <CTX as ContextTr>::Tx;
     type Block = <CTX as ContextTr>::Block;
@@ -211,12 +210,13 @@ where
 impl<CTX, INSP, INST, PRECOMPILES> ExecuteCommitEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
-    CTX: ContextTr<Journal: JournalTr<State = EvmState>, Db: DatabaseCommit> + ContextSetters,
+    CTX: ContextTr<Journal: JournalTr<State = LazyEvmState>, Db: DatabaseCommit> + ContextSetters,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
 {
     #[inline]
     fn commit(&mut self, state: Self::State) {
+        let state = LazyEvmStateHandle(state).resolve_full_state(self.db_mut()).unwrap();
         self.db_mut().commit(state);
     }
 }

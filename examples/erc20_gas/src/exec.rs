@@ -1,16 +1,10 @@
 use crate::handler::Erc20MainnetHandler;
 use revm::{
-    context_interface::{
-        result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction},
-        ContextTr, JournalTr,
-    },
-    database_interface::DatabaseCommit,
-    handler::{
-        instructions::InstructionProvider, ContextTrDbError, EthFrame, EvmTr, Handler,
-        PrecompileProvider,
-    },
-    interpreter::{interpreter::EthInterpreter, InterpreterResult},
-    state::EvmState,
+    context::inner::LazyEvmStateHandle, context_interface::{
+        ContextTr, JournalTr, result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction}
+    }, database_interface::DatabaseCommit, handler::{
+        ContextTrDbError, EthFrame, EvmTr, Handler, PrecompileProvider, instructions::InstructionProvider
+    }, interpreter::{InterpreterResult, interpreter::EthInterpreter}, state::{LazyEvmState}
 };
 
 type Erc20Error<CTX> = EVMError<ContextTrDbError<CTX>, InvalidTransaction>;
@@ -20,10 +14,10 @@ type Erc20Error<CTX> = EVMError<ContextTrDbError<CTX>, InvalidTransaction>;
 /// This function does not commit the state to the database.
 pub fn transact_erc20evm<EVM>(
     evm: &mut EVM,
-) -> Result<(ExecutionResult<HaltReason>, EvmState), Erc20Error<EVM::Context>>
+) -> Result<(ExecutionResult<HaltReason>, LazyEvmState), Erc20Error<EVM::Context>>
 where
     EVM: EvmTr<
-        Context: ContextTr<Journal: JournalTr<State = EvmState>>,
+        Context: ContextTr<Journal: JournalTr<State = LazyEvmState>>,
         Precompiles: PrecompileProvider<EVM::Context, Output = InterpreterResult>,
         Instructions: InstructionProvider<
             Context = EVM::Context,
@@ -46,7 +40,7 @@ pub fn transact_erc20evm_commit<EVM>(
 ) -> Result<ExecutionResult<HaltReason>, Erc20Error<EVM::Context>>
 where
     EVM: EvmTr<
-        Context: ContextTr<Journal: JournalTr<State = EvmState>, Db: DatabaseCommit>,
+        Context: ContextTr<Journal: JournalTr<State = LazyEvmState>, Db: DatabaseCommit>,
         Precompiles: PrecompileProvider<EVM::Context, Output = InterpreterResult>,
         Instructions: InstructionProvider<
             Context = EVM::Context,
@@ -56,7 +50,8 @@ where
     >,
 {
     transact_erc20evm(evm).map(|(result, state)| {
+        let state = LazyEvmStateHandle(state).resolve_full_state(evm.ctx().db_mut())?;
         evm.ctx().db_mut().commit(state);
-        result
-    })
+        Ok(result)
+    })?
 }

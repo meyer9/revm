@@ -23,11 +23,11 @@ use crate::{
     frame::EthFrame, instructions::InstructionProvider, ExecuteCommitEvm, ExecuteEvm, Handler,
     MainnetHandler, PrecompileProvider,
 };
-use context::{result::ExecResultAndState, ContextSetters, ContextTr, Evm, JournalTr, TxEnv};
+use context::{ContextSetters, ContextTr, Evm, JournalTr, TxEnv, inner::LazyEvmStateHandle, result::ExecResultAndState};
 use database_interface::DatabaseCommit;
 use interpreter::{interpreter::EthInterpreter, InterpreterResult};
 use primitives::{address, Address, Bytes, TxKind};
-use state::EvmState;
+use state::{EvmState, LazyEvmState};
 
 /// The system address used for system calls.
 pub const SYSTEM_ADDRESS: Address = address!("0xfffffffffffffffffffffffffffffffffffffffe");
@@ -220,7 +220,7 @@ pub trait SystemCallCommitEvm: SystemCallEvm + ExecuteCommitEvm {
 impl<CTX, INSP, INST, PRECOMPILES> SystemCallEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
-    CTX: ContextTr<Journal: JournalTr<State = EvmState>, Tx: SystemCallTx> + ContextSetters,
+    CTX: ContextTr<Journal: JournalTr<State = LazyEvmState>, Tx: SystemCallTx> + ContextSetters,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
 {
@@ -244,7 +244,7 @@ where
 impl<CTX, INSP, INST, PRECOMPILES> SystemCallCommitEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
-    CTX: ContextTr<Journal: JournalTr<State = EvmState>, Db: DatabaseCommit, Tx: SystemCallTx>
+    CTX: ContextTr<Journal: JournalTr<State = LazyEvmState>, Db: DatabaseCommit, Tx: SystemCallTx>
         + ContextSetters,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
@@ -257,9 +257,10 @@ where
     ) -> Result<Self::ExecutionResult, Self::Error> {
         self.system_call_with_caller(caller, system_contract_address, data)
             .map(|output| {
-                self.db_mut().commit(output.state);
-                output.result
-            })
+                let state: std::collections::HashMap<Address, state::Account> = LazyEvmStateHandle(output.state).resolve_full_state(self.db_mut())?;
+                self.db_mut().commit(state);
+                Ok(output.result)
+            })?
     }
 }
 
@@ -313,9 +314,9 @@ mod tests {
             }
         );
         // only system contract is updated and present
-        assert_eq!(output.state.len(), 1);
+        assert_eq!(output.state.loaded_state.len(), 1);
         assert_eq!(
-            output.state[&HISTORY_STORAGE_ADDRESS]
+            output.state.loaded_state[&HISTORY_STORAGE_ADDRESS]
                 .storage
                 .get(&StorageKey::from(0))
                 .map(|slot| slot.present_value)

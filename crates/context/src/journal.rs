@@ -21,7 +21,7 @@ use database_interface::Database;
 use primitives::{
     hardfork::SpecId, Address, HashMap, HashSet, Log, StorageKey, StorageValue, B256, U256,
 };
-use state::{Account, EvmState};
+use state::{Account, EvmState, LazyEvmState};
 use std::vec::Vec;
 
 /// A journal of state changes internal to the EVM
@@ -91,7 +91,7 @@ impl<DB, ENTRY: JournalEntryTr + Clone> Journal<DB, ENTRY> {
 
 impl<DB: Database, ENTRY: JournalEntryTr> JournalTr for Journal<DB, ENTRY> {
     type Database = DB;
-    type State = EvmState;
+    type State = LazyEvmState;
     type JournaledAccount<'a>
         = JournaledAccount<'a, DB, ENTRY>
     where

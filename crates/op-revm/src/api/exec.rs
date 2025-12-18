@@ -4,28 +4,19 @@ use crate::{
     OpTransactionError,
 };
 use revm::{
-    context::{result::ExecResultAndState, ContextSetters},
-    context_interface::{
-        result::{EVMError, ExecutionResult},
-        Cfg, ContextTr, Database, JournalTr,
-    },
-    handler::{
-        instructions::EthInstructions, system_call::SystemCallEvm, EthFrame, Handler,
-        PrecompileProvider, SystemCallTx,
-    },
-    inspector::{
+    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm, context::{ContextSetters, inner::LazyEvmStateHandle, result::ExecResultAndState}, context_interface::{
+        Cfg, ContextTr, Database, JournalTr, result::{EVMError, ExecutionResult}
+    }, handler::{
+        EthFrame, Handler, PrecompileProvider, SystemCallTx, instructions::EthInstructions, system_call::SystemCallEvm
+    }, inspector::{
         InspectCommitEvm, InspectEvm, InspectSystemCallEvm, Inspector, InspectorHandler, JournalExt,
-    },
-    interpreter::{interpreter::EthInterpreter, InterpreterResult},
-    primitives::{Address, Bytes},
-    state::EvmState,
-    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm,
+    }, interpreter::{InterpreterResult, interpreter::EthInterpreter}, primitives::{Address, Bytes}, state::{EvmState, LazyEvmState}
 };
 
 /// Type alias for Optimism context
 pub trait OpContextTr:
     ContextTr<
-    Journal: JournalTr<State = EvmState>,
+    Journal: JournalTr<State = LazyEvmState>,
     Tx: OpTxTr,
     Cfg: Cfg<Spec = OpSpecId>,
     Chain = L1BlockInfo,
@@ -35,7 +26,7 @@ pub trait OpContextTr:
 
 impl<T> OpContextTr for T where
     T: ContextTr<
-        Journal: JournalTr<State = EvmState>,
+        Journal: JournalTr<State = LazyEvmState>,
         Tx: OpTxTr,
         Cfg: Cfg<Spec = OpSpecId>,
         Chain = L1BlockInfo,
@@ -54,7 +45,7 @@ where
 {
     type Tx = <CTX as ContextTr>::Tx;
     type Block = <CTX as ContextTr>::Block;
-    type State = EvmState;
+    type State = LazyEvmState;
     type Error = OpError<CTX>;
     type ExecutionResult = ExecutionResult<OpHaltReason>;
 
@@ -90,6 +81,7 @@ where
     PRECOMPILE: PrecompileProvider<CTX, Output = InterpreterResult>,
 {
     fn commit(&mut self, state: Self::State) {
+        let state = LazyEvmStateHandle(state).resolve_full_state(self.0.ctx.db_mut()).unwrap();
         self.0.ctx.db_mut().commit(state);
     }
 }
