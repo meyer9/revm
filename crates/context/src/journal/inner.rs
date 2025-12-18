@@ -14,6 +14,7 @@ use primitives::{
 };
 use state::{Account, AccountStatus, EvmState, EvmStorageSlot, LazyEvmState, TransientStorage};
 use std::vec::Vec;
+use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -356,9 +357,11 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         balance: U256,
     ) -> Result<(), DB::Error> {
         if self.state.0.loaded_state.contains_key(&address) {
-            let mut account = self.load_account_mut(db, address)?.data;
+            debug!("revm: found address in state, no reason to mark as increment");
+            let mut account: JournaledAccount<'_, ENTRY> = self.load_account_mut(db, address)?.data;
             account.incr_balance(balance);
         } else {
+            debug!("revm: simple increment, not loading account");
             self.state.0.pending_balance_increments.entry(address).and_modify(|addr_bal| *addr_bal = balance.saturating_add(balance)).or_insert(balance);
             self.journal.push(ENTRY::balance_incremented(address, balance))
         }
