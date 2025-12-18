@@ -782,10 +782,6 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
             }
         };
 
-        if address == address!("0x0000000000000000000000000000000000000006") {
-            debug!("loading account 0x0000000000000000000000000000000000000006: {}", Backtrace::capture());
-        }
-
         // journal loading of cold account.
         if load.is_cold {
             self.journal.push(ENTRY::account_warmed(address));
