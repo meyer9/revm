@@ -1,13 +1,12 @@
 use revm::{
-    context::{journaled_state::account::JournaledAccountTr, Cfg},
-    context_interface::{result::HaltReason, Block, ContextTr, JournalTr, Transaction},
+    context::{Cfg, journaled_state::account::JournaledAccountTr},
+    context_interface::{Block, ContextTr, JournalTr, Transaction, result::HaltReason},
     handler::{
-        pre_execution::{calculate_caller_fee, validate_account_nonce_and_code_with_components},
-        EvmTr, EvmTrError, FrameResult, FrameTr, Handler,
+        EvmTr, EvmTrError, FrameResult, FrameTr, Handler, pre_execution::{calculate_caller_fee, validate_account_nonce_and_code_with_components}
     },
     interpreter::interpreter_action::FrameInit,
-    primitives::{hardfork::SpecId, U256},
-    state::EvmState,
+    primitives::{U256, hardfork::SpecId},
+    state::{EvmState, LazyEvmState},
 };
 
 use crate::{erc_address_storage, TOKEN};
@@ -37,7 +36,7 @@ impl<EVM, ERROR, FRAME> Default for Erc20MainnetHandler<EVM, ERROR, FRAME> {
 
 impl<EVM, ERROR, FRAME> Handler for Erc20MainnetHandler<EVM, ERROR, FRAME>
 where
-    EVM: EvmTr<Context: ContextTr<Journal: JournalTr<State = EvmState>>, Frame = FRAME>,
+    EVM: EvmTr<Context: ContextTr<Journal: JournalTr<State = LazyEvmState>>, Frame = FRAME>,
     FRAME: FrameTr<FrameResult = FrameResult, FrameInit = FrameInit>,
     ERROR: EvmTrError<EVM>,
 {

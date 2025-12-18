@@ -12,13 +12,74 @@ use context_interface::{
 use core::mem;
 use database_interface::Database;
 use primitives::{
-    hardfork::SpecId::{self, *},
-    hash_map::Entry,
-    hints_util::unlikely,
-    Address, HashMap, Log, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
+    Address, B256, HashMap, HashSet, KECCAK_EMPTY, Log, StorageKey, StorageValue, U256, hardfork::SpecId::{self, *}, hash_map::Entry, hints_util::unlikely
 };
-use state::{Account, EvmState, TransientStorage};
+use state::{Account, AccountStatus, EvmState, LazyEvmState, TransientStorage};
 use std::vec::Vec;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LazyEvmStateHandle(pub LazyEvmState);
+
+impl Default for LazyEvmStateHandle {
+    fn default() -> Self {
+        Self(LazyEvmState {
+            loaded_state: HashMap::default(),
+            pending_balance_increments: HashMap::default(),
+        })
+    }
+}
+
+impl LazyEvmStateHandle {
+    pub fn from_evm_state(evm_state: EvmState) -> Self {
+        Self(LazyEvmState {
+            loaded_state: evm_state,
+            pending_balance_increments: HashMap::default(),
+        })
+    }
+
+    /// Called to resolve remaining balances that are in pending_balance_increments.
+    pub fn resolve_full_state<DB: Database>(&mut self, db: &mut DB) -> Result<EvmState, DB::Error> {
+        let mut full_state = HashMap::default();
+        // set of keys that exist in both loaded_state and pending_balance_increments
+        let keys: HashSet<&Address> = HashSet::from_iter(self.0.loaded_state.keys().chain(self.0.pending_balance_increments.keys()));
+        for address in keys {
+            // if account is in loaded_state, return it from there
+            if let Some(account) = self.0.loaded_state.get(address) {
+                full_state.insert(*address, account.clone());
+                continue;
+            }
+            let db_account = db.basic(*address)?;
+            let preexisting = db_account.is_some();
+            let mut account: Account = db_account.unwrap_or_default().into();
+            if !preexisting {
+                account.status |= AccountStatus::LoadedAsNotExisting;
+            }
+            account.mark_touch();
+            if let Some(balance_increment) = self.0.pending_balance_increments.get(address) {
+                account.info.balance = account.info.balance.saturating_add(*balance_increment);
+            }
+            full_state.insert(*address, account);
+        }
+        Ok(full_state)
+    }
+
+    /// Called when an account is loaded from the database.
+    pub fn account_loaded(&mut self, address: Address, loaded_account: Account) -> &mut Account {
+        let mut account = loaded_account.clone();
+        // if account is in pending_balance_increments, add it to the account's balance and mark as touched
+        if let Some(balance_increment) = self.0.pending_balance_increments.get(&address) {
+            account.info.balance = account.info.balance.saturating_add(*balance_increment);
+            account.mark_touch();
+            self.0.pending_balance_increments.remove(&address);
+        }
+        self.0.loaded_state.insert(address, account);
+
+        // return mutable reference to account
+        self.0.loaded_state.get_mut(&address).unwrap()
+    }
+}
+
 /// Inner journal state that contains journal and state changes.
 ///
 /// Spec Id is a essential information for the Journal.
@@ -26,7 +87,7 @@ use std::vec::Vec;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct JournalInner<ENTRY> {
     /// The current state
-    pub state: EvmState,
+    pub state: LazyEvmStateHandle,
     /// Transient storage that is discarded after every transaction.
     ///
     /// See [EIP-1153](https://eips.ethereum.org/EIPS/eip-1153).
@@ -73,7 +134,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     /// In ordinary case this is precompile or beneficiary.
     pub fn new() -> JournalInner<ENTRY> {
         Self {
-            state: HashMap::default(),
+            state: LazyEvmStateHandle::default(),
             transient_storage: TransientStorage::default(),
             logs: Vec::new(),
             journal: Vec::default(),
@@ -142,7 +203,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         let is_spurious_dragon_enabled = spec.is_enabled_in(SPURIOUS_DRAGON);
         // iterate over all journals entries and revert our global state
         journal.drain(..).rev().for_each(|entry| {
-            entry.revert(state, None, is_spurious_dragon_enabled);
+            entry.revert(&mut state.0, None, is_spurious_dragon_enabled);
         });
         transient_storage.clear();
         *depth = 0;
@@ -158,7 +219,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     /// Note: Precompile addresses and spec are preserved and initial state of
     /// warm_preloaded_addresses will contain precompiles addresses.
     #[inline]
-    pub fn finalize(&mut self) -> EvmState {
+    pub fn finalize(&mut self) -> LazyEvmState {
         // Clears all field from JournalInner. Doing it this way to avoid
         // missing any field.
         let Self {
@@ -186,13 +247,13 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         // reset transaction id.
         *transaction_id = 0;
 
-        state
+        state.0
     }
 
     /// Return reference to state.
     #[inline]
-    pub fn state(&mut self) -> &mut EvmState {
-        &mut self.state
+    pub fn state(&mut self) -> &mut LazyEvmState {
+        &mut self.state.0
     }
 
     /// Sets SpecId.
@@ -206,7 +267,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     /// be removed from state.
     #[inline]
     pub fn touch(&mut self, address: Address) {
-        if let Some(account) = self.state.get_mut(&address) {
+        if let Some(account) = self.state.0.loaded_state.get_mut(&address) {
             Self::touch_account(&mut self.journal, address, account);
         }
     }
@@ -230,7 +291,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     #[inline]
     pub fn account(&self, address: Address) -> &Account {
         self.state
-            .get(&address)
+            .0.loaded_state.get(&address)
             .expect("Account expected to be loaded") // Always assume that acc is already loaded
     }
 
@@ -239,7 +300,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     /// Note: Assume account is warm and that hash is calculated from code.
     #[inline]
     pub fn set_code_with_hash(&mut self, address: Address, code: Bytecode, hash: B256) {
-        let account = self.state.get_mut(&address).unwrap();
+        let account = self.state.0.loaded_state.get_mut(&address).unwrap();
         Self::touch_account(&mut self.journal, address, account);
 
         self.journal.push(ENTRY::code_changed(address));
@@ -320,7 +381,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         balance: U256,
     ) -> Option<TransferError> {
         if from == to {
-            let from_balance = self.state.get_mut(&to).unwrap().info.balance;
+            let from_balance = self.state.0.loaded_state.get_mut(&to).unwrap().info.balance;
             // Check if from balance is enough to transfer the balance.
             if balance > from_balance {
                 return Some(TransferError::OutOfFunds);
@@ -329,12 +390,12 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         }
 
         if balance.is_zero() {
-            Self::touch_account(&mut self.journal, to, self.state.get_mut(&to).unwrap());
+            Self::touch_account(&mut self.journal, to, self.state.0.loaded_state.get_mut(&to).unwrap());
             return None;
         }
 
         // sub balance from
-        let from_account = self.state.get_mut(&from).unwrap();
+        let from_account = self.state.0.loaded_state.get_mut(&from).unwrap();
         Self::touch_account(&mut self.journal, from, from_account);
         let from_balance = &mut from_account.info.balance;
         let Some(from_balance_decr) = from_balance.checked_sub(balance) else {
@@ -343,7 +404,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         *from_balance = from_balance_decr;
 
         // add balance to
-        let to_account = self.state.get_mut(&to).unwrap();
+        let to_account = self.state.0.loaded_state.get_mut(&to).unwrap();
         Self::touch_account(&mut self.journal, to, to_account);
         let to_balance = &mut to_account.info.balance;
         let Some(to_balance_incr) = to_balance.checked_add(balance) else {
@@ -400,7 +461,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         let checkpoint = self.checkpoint();
 
         // Newly created account is present, as we just loaded it.
-        let target_acc = self.state.get_mut(&target_address).unwrap();
+        let target_acc = self.state.0.loaded_state.get_mut(&target_address).unwrap();
         let last_journal = &mut self.journal;
 
         // New account can be created if:
@@ -436,7 +497,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         target_acc.info.balance = new_balance;
 
         // safe to decrement for the caller as balance check is already done.
-        self.state.get_mut(&caller).unwrap().info.balance -= balance;
+        self.state.0.loaded_state.get_mut(&caller).unwrap().info.balance -= balance;
 
         // add journal entry of transferred balance
         last_journal.push(ENTRY::balance_transfer(caller, target_address, balance));
@@ -476,7 +537,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
                 .drain(checkpoint.journal_i..)
                 .rev()
                 .for_each(|entry| {
-                    entry.revert(state, Some(transient_storage), is_spurious_dragon_enabled);
+                    entry.revert(&mut state.0, Some(transient_storage), is_spurious_dragon_enabled);
                 });
         }
     }
@@ -508,14 +569,14 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
         if address != target {
             // Both accounts are loaded before this point, `address` as we execute its contract.
             // and `target` at the beginning of the function.
-            let acc_balance = self.state.get(&address).unwrap().info.balance;
+            let acc_balance = self.state.0.loaded_state.get(&address).unwrap().info.balance;
 
-            let target_account = self.state.get_mut(&target).unwrap();
+            let target_account = self.state.0.loaded_state.get_mut(&target).unwrap();
             Self::touch_account(&mut self.journal, target, target_account);
             target_account.info.balance += acc_balance;
         }
 
-        let acc = self.state.get_mut(&address).unwrap();
+        let acc = self.state.0.loaded_state.get_mut(&address).unwrap();
         let balance = acc.info.balance;
 
         let destroyed_status = if !acc.is_selfdestructed() {
@@ -707,7 +768,7 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     where
         'db: 'a,
     {
-        let account = self.state.get_mut(&address)?;
+        let account = self.state.0.loaded_state.get_mut(&address)?;
         Some(JournaledAccount::new(
             address,
             account,
@@ -729,57 +790,53 @@ impl<ENTRY: JournalEntryTr> JournalInner<ENTRY> {
     where
         'db: 'a,
     {
-        let (account, is_cold) = match self.state.entry(address) {
-            Entry::Occupied(entry) => {
-                let account = entry.into_mut();
+        let (account, is_cold) = if self.state.0.loaded_state.contains_key(&address) {
+            let account = self.state.0.loaded_state.get_mut(&address).unwrap();
+            // skip load if account is cold.
+            let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
 
-                // skip load if account is cold.
-                let mut is_cold = account.is_cold_transaction_id(self.transaction_id);
-
-                if unlikely(is_cold) {
-                    is_cold = self
-                        .warm_addresses
-                        .check_is_cold(&address, skip_cold_load)?;
-
-                    // mark it warm.
-                    account.mark_warm_with_transaction_id(self.transaction_id);
-
-                    // if it is cold loaded and we have selfdestructed locally it means that
-                    // account was selfdestructed in previous transaction and we need to clear its information and storage.
-                    if account.is_selfdestructed_locally() {
-                        account.selfdestruct();
-                        account.unmark_selfdestructed_locally();
-                    }
-                    // unmark locally created
-                    account.unmark_created_locally();
-
-                    // journal loading of cold account.
-                    self.journal.push(ENTRY::account_warmed(address));
-                }
-                (account, is_cold)
-            }
-            Entry::Vacant(vac) => {
-                // Precompiles,  among some other account(access list and coinbase included)
-                // are warm loaded so we need to take that into account
-                let is_cold = self
+            if unlikely(is_cold) {
+                is_cold = self
                     .warm_addresses
                     .check_is_cold(&address, skip_cold_load)?;
 
-                let account = if let Some(account) = db.basic(address)? {
-                    let mut account: Account = account.into();
-                    account.transaction_id = self.transaction_id;
-                    account
-                } else {
-                    Account::new_not_existing(self.transaction_id)
-                };
+                // mark it warm.
+                account.mark_warm_with_transaction_id(self.transaction_id);
+
+                // if it is cold loaded and we have selfdestructed locally it means that
+                // account was selfdestructed in previous transaction and we need to clear its information and storage.
+                if account.is_selfdestructed_locally() {
+                    account.selfdestruct();
+                    account.unmark_selfdestructed_locally();
+                }
+                // unmark locally created
+                account.unmark_created_locally();
 
                 // journal loading of cold account.
-                if is_cold {
-                    self.journal.push(ENTRY::account_warmed(address));
-                }
-
-                (vac.insert(account), is_cold)
+                self.journal.push(ENTRY::account_warmed(address));
             }
+            (account, is_cold)
+        } else {
+            // Precompiles,  among some other account(access list and coinbase included)
+            // are warm loaded so we need to take that into account
+            let is_cold = self
+                .warm_addresses
+                .check_is_cold(&address, skip_cold_load)?;
+
+            let account = if let Some(account) = db.basic(address)? {
+                let mut account: Account = account.into();
+                account.transaction_id = self.transaction_id;
+                account
+            } else {
+                Account::new_not_existing(self.transaction_id)
+            };
+
+            // journal loading of cold account.
+            if is_cold {
+                self.journal.push(ENTRY::account_warmed(address));
+            }
+
+            (self.state.account_loaded(address, account), is_cold)
         };
 
         Ok(StateLoad::new(
@@ -943,7 +1000,7 @@ mod tests {
         };
         journal
             .state
-            .insert(test_address, Account::from(account_info));
+            .0.loaded_state.insert(test_address, Account::from(account_info));
 
         // Add storage slot to access list (make it warm)
         let mut access_list = HashMap::default();

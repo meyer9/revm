@@ -1,18 +1,10 @@
 use crate::{evm::MyEvm, handler::MyHandler};
 use revm::{
-    context::{
-        result::{ExecResultAndState, HaltReason, InvalidTransaction},
-        ContextSetters,
-    },
-    context_interface::{
-        result::{EVMError, ExecutionResult},
-        ContextTr, Database, JournalTr,
-    },
-    handler::{EvmTr, Handler},
-    inspector::{InspectCommitEvm, InspectEvm, Inspector, InspectorHandler, JournalExt},
-    interpreter::interpreter::EthInterpreter,
-    state::EvmState,
-    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm,
+    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm, context::{
+        ContextSetters, inner::LazyEvmStateHandle, result::{ExecResultAndState, HaltReason, InvalidTransaction}
+    }, context_interface::{
+        ContextTr, Database, JournalTr, result::{EVMError, ExecutionResult}
+    }, handler::{EvmTr, Handler}, inspector::{InspectCommitEvm, InspectEvm, Inspector, InspectorHandler, JournalExt}, interpreter::interpreter::EthInterpreter, state::{EvmState, LazyEvmState}
 };
 
 /// Type alias for the error type of the OpEvm.
@@ -21,9 +13,9 @@ type MyError<CTX> = EVMError<<<CTX as ContextTr>::Db as Database>::Error, Invali
 // Trait that allows to replay and transact the transaction.
 impl<CTX, INSP> ExecuteEvm for MyEvm<CTX, INSP>
 where
-    CTX: ContextSetters<Journal: JournalTr<State = EvmState>>,
+    CTX: ContextSetters<Journal: JournalTr<State = LazyEvmState>>,
 {
-    type State = EvmState;
+    type State = LazyEvmState;
     type ExecutionResult = ExecutionResult<HaltReason>;
     type Error = MyError<CTX>;
 
@@ -59,9 +51,10 @@ where
 // Trait allows replay_commit and transact_commit functionality.
 impl<CTX, INSP> ExecuteCommitEvm for MyEvm<CTX, INSP>
 where
-    CTX: ContextSetters<Db: DatabaseCommit, Journal: JournalTr<State = EvmState>>,
+    CTX: ContextSetters<Db: DatabaseCommit, Journal: JournalTr<State = LazyEvmState>>,
 {
     fn commit(&mut self, state: Self::State) {
+        let state = LazyEvmStateHandle(state).resolve_full_state(self.ctx().db_mut()).unwrap();
         self.ctx().db_mut().commit(state);
     }
 }
@@ -69,7 +62,7 @@ where
 // Inspection trait.
 impl<CTX, INSP> InspectEvm for MyEvm<CTX, INSP>
 where
-    CTX: ContextSetters<Journal: JournalTr<State = EvmState> + JournalExt>,
+    CTX: ContextSetters<Journal: JournalTr<State = LazyEvmState> + JournalExt>,
     INSP: Inspector<CTX, EthInterpreter>,
 {
     type Inspector = INSP;
@@ -88,7 +81,7 @@ where
 // Inspect
 impl<CTX, INSP> InspectCommitEvm for MyEvm<CTX, INSP>
 where
-    CTX: ContextSetters<Db: DatabaseCommit, Journal: JournalTr<State = EvmState> + JournalExt>,
+    CTX: ContextSetters<Db: DatabaseCommit, Journal: JournalTr<State = LazyEvmState> + JournalExt>,
     INSP: Inspector<CTX, EthInterpreter>,
 {
 }

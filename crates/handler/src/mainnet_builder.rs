@@ -117,7 +117,7 @@ mod test {
             .unwrap()
             .state;
 
-        let auth_acc = state.get(&signer.address()).unwrap();
+        let auth_acc = state.loaded_state.get(&signer.address()).unwrap();
         assert_eq!(auth_acc.info.code, Some(Bytecode::new_eip7702(FFADDRESS)));
         assert_eq!(auth_acc.info.nonce, 1);
         assert_eq!(

@@ -11,7 +11,7 @@ use crate::{context::ContextError, transaction::TransactionError};
 use core::fmt::{self, Debug};
 use database_interface::DBErrorMarker;
 use primitives::{Address, Bytes, Log, U256};
-use state::EvmState;
+use state::{EvmState, LazyEvmState};
 use std::{borrow::Cow, boxed::Box, string::String, vec::Vec};
 
 /// Trait for the halt reason.
@@ -22,7 +22,7 @@ impl<T> HaltReasonTr for T where T: Clone + Debug + PartialEq + Eq + From<HaltRe
 /// Tuple containing evm execution result and state.s
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecResultAndState<R, S = EvmState> {
+pub struct ExecResultAndState<R, S = LazyEvmState> {
     /// Execution result
     pub result: R,
     /// Output State.
@@ -30,7 +30,7 @@ pub struct ExecResultAndState<R, S = EvmState> {
 }
 
 /// Type alias for backwards compatibility.
-pub type ResultAndState<H = HaltReason, S = EvmState> = ExecResultAndState<ExecutionResult<H>, S>;
+pub type ResultAndState<H = HaltReason, S = LazyEvmState> = ExecResultAndState<ExecutionResult<H>, S>;
 
 /// Tuple containing multiple execution results and state.
 pub type ResultVecAndState<R, S> = ExecResultAndState<Vec<R>, S>;

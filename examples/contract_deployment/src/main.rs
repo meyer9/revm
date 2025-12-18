@@ -78,6 +78,7 @@ fn main() -> anyhow::Result<()> {
     )?;
     let Some(storage0) = output
         .state
+        .loaded_state
         .get(&address)
         .ok_or_else(|| anyhow!("Contract not found"))?
         .storage
