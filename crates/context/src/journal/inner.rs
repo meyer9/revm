@@ -14,7 +14,7 @@ use database_interface::Database;
 use primitives::{
     Address, B256, HashMap, HashSet, KECCAK_EMPTY, Log, StorageKey, StorageValue, U256, hardfork::SpecId::{self, *}, hash_map::Entry, hints_util::unlikely
 };
-use state::{Account, EvmState, TransientStorage, LazyEvmState};
+use state::{Account, AccountStatus, EvmState, LazyEvmState, TransientStorage};
 use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,8 +43,18 @@ impl LazyEvmStateHandle {
         // set of keys that exist in both loaded_state and pending_balance_increments
         let keys: HashSet<&Address> = HashSet::from_iter(self.0.loaded_state.keys().chain(self.0.pending_balance_increments.keys()));
         for address in keys {
-            let db_account = db.basic(*address)?.unwrap_or_default();
-            let mut account: Account = db_account.into();
+            // if account is in loaded_state, return it from there
+            if let Some(account) = self.0.loaded_state.get(address) {
+                full_state.insert(*address, account.clone());
+                continue;
+            }
+            let db_account = db.basic(*address)?;
+            let preexisting = db_account.is_some();
+            let mut account: Account = db_account.unwrap_or_default().into();
+            if !preexisting {
+                account.status |= AccountStatus::LoadedAsNotExisting;
+            }
+            account.mark_touch();
             if let Some(balance_increment) = self.0.pending_balance_increments.get(address) {
                 account.info.balance = account.info.balance.saturating_add(*balance_increment);
             }

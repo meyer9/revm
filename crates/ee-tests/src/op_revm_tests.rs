@@ -61,7 +61,6 @@ fn test_deposit_tx() {
     assert_eq!(
         output
             .state
-            .loaded_state
             .get(&Address::default())
             .map(|a| a.info.balance),
         Some(U256::from(100))
@@ -103,7 +102,7 @@ fn test_halted_deposit_tx() {
         }
     );
     assert_eq!(
-        output.state.loaded_state.get(&BENCH_CALLER).map(|a| a.info.balance),
+        output.state.get(&BENCH_CALLER).map(|a| a.info.balance),
         Some(U256::from(100) + BENCH_CALLER_BALANCE)
     );
 
@@ -1175,6 +1174,6 @@ fn test_system_call() {
     let _ = evm.system_call_one(BENCH_TARGET, bytes!("0x0001"));
     let state = evm.finalize();
 
-    assert!(state.loaded_state.get(&SYSTEM_ADDRESS).is_none());
-    assert!(state.loaded_state.get(&BENCH_TARGET).unwrap().is_touched());
+    assert!(state.get(&SYSTEM_ADDRESS).is_none());
+    assert!(state.get(&BENCH_TARGET).unwrap().is_touched());
 }
