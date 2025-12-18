@@ -6,22 +6,11 @@ use op_revm::{
     OpHaltReason, OpSpecId, OpTransaction,
 };
 use revm::{
-    bytecode::opcode,
-    context::{
-        result::{ExecutionResult, OutOfGasError},
-        BlockEnv, CfgEnv, TxEnv,
-    },
-    context_interface::result::HaltReason,
-    database::{BenchmarkDB, EmptyDB, State, BENCH_CALLER, BENCH_CALLER_BALANCE, BENCH_TARGET},
-    handler::system_call::SYSTEM_ADDRESS,
-    interpreter::{
-        gas::{calculate_initial_tx_gas, InitialAndFloorGas},
-        Interpreter, InterpreterTypes,
-    },
-    precompile::{bls12_381_const, bls12_381_utils, bn254, secp256r1, u64_to_address},
-    primitives::{address, bytes, eip7825, Address, Bytes, Log, TxKind, U256},
-    state::Bytecode,
-    Context, ExecuteEvm, InspectEvm, Inspector, Journal, SystemCallEvm,
+    Context, ExecuteEvm, InspectEvm, Inspector, Journal, SystemCallEvm, bytecode::opcode, context::{
+        BlockEnv, CfgEnv, TxEnv, inner::LazyEvmStateHandle, result::{ExecutionResult, OutOfGasError}
+    }, context_interface::result::HaltReason, database::{BENCH_CALLER, BENCH_CALLER_BALANCE, BENCH_TARGET, BenchmarkDB, EmptyDB, State}, handler::system_call::SYSTEM_ADDRESS, interpreter::{
+        Interpreter, InterpreterTypes, gas::{InitialAndFloorGas, calculate_initial_tx_gas}
+    }, precompile::{bls12_381_const, bls12_381_utils, bn254, secp256r1, u64_to_address}, primitives::{Address, Bytes, Log, TxKind, U256, address, bytes, eip7825}, state::Bytecode
 };
 use std::path::PathBuf;
 use std::vec::Vec;
@@ -1175,6 +1164,6 @@ fn test_system_call() {
     let _ = evm.system_call_one(BENCH_TARGET, bytes!("0x0001"));
     let state = evm.finalize();
 
-    assert!(state.get(&SYSTEM_ADDRESS).is_none());
-    assert!(state.get(&BENCH_TARGET).unwrap().is_touched());
+    assert!(state.loaded_state.get(&SYSTEM_ADDRESS).is_none());
+    assert!(state.loaded_state.get(&BENCH_TARGET).unwrap().is_touched());
 }

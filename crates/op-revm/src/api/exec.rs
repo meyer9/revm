@@ -45,7 +45,7 @@ where
 {
     type Tx = <CTX as ContextTr>::Tx;
     type Block = <CTX as ContextTr>::Block;
-    type State = EvmState;
+    type State = LazyEvmState;
     type Error = OpError<CTX>;
     type ExecutionResult = ExecutionResult<OpHaltReason>;
 
@@ -60,9 +60,7 @@ where
     }
 
     fn finalize(&mut self) -> Self::State {
-        let state = self.0.ctx.journal_mut().finalize();
-        LazyEvmStateHandle(state).resolve_full_state(self.0.ctx.db_mut()).unwrap()
-
+        self.0.ctx.journal_mut().finalize()
     }
 
     fn replay(
@@ -83,6 +81,7 @@ where
     PRECOMPILE: PrecompileProvider<CTX, Output = InterpreterResult>,
 {
     fn commit(&mut self, state: Self::State) {
+        let state = LazyEvmStateHandle(state).resolve_full_state(self.0.ctx.db_mut()).unwrap();
         self.0.ctx.db_mut().commit(state);
     }
 }
