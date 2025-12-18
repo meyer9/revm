@@ -754,7 +754,7 @@ mod tests {
 
         assert!(result.result.is_success());
         assert!(evm.inspector.get_step_count() > 0);
-        assert!(!result.state.is_empty());
+        assert!(!result.state.loaded_state.is_empty());
     }
 
     #[test]

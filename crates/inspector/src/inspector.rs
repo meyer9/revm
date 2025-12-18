@@ -180,12 +180,6 @@ pub trait JournalExt {
     /// Get the journal entries that are created from last checkpoint.
     /// new checkpoint is created when sub call is made.
     fn journal(&self) -> &[JournalEntry];
-
-    /// Return the current Journaled state.
-    fn evm_state(&self) -> &EvmState;
-
-    /// Return the mutable current Journaled state.
-    fn evm_state_mut(&mut self) -> &mut EvmState;
 }
 
 impl<DB: Database> JournalExt for Journal<DB> {
@@ -197,15 +191,5 @@ impl<DB: Database> JournalExt for Journal<DB> {
     #[inline]
     fn journal(&self) -> &[JournalEntry] {
         &self.journal
-    }
-
-    #[inline]
-    fn evm_state(&self) -> &EvmState {
-        &self.state
-    }
-
-    #[inline]
-    fn evm_state_mut(&mut self) -> &mut EvmState {
-        &mut self.state
     }
 }

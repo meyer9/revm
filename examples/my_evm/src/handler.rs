@@ -1,14 +1,7 @@
 use revm::{
-    context::result::{EVMError, HaltReason, InvalidTransaction},
-    context_interface::{ContextTr, JournalTr},
-    handler::{
-        evm::FrameTr, instructions::InstructionProvider, EvmTr, FrameResult, Handler,
-        PrecompileProvider,
-    },
-    inspector::{Inspector, InspectorEvmTr, InspectorHandler},
-    interpreter::{interpreter::EthInterpreter, interpreter_action::FrameInit, InterpreterResult},
-    state::EvmState,
-    Database,
+    Database, context::result::{EVMError, HaltReason, InvalidTransaction}, context_interface::{ContextTr, JournalTr}, handler::{
+        EvmTr, FrameResult, Handler, PrecompileProvider, evm::FrameTr, instructions::InstructionProvider
+    }, inspector::{Inspector, InspectorEvmTr, InspectorHandler}, interpreter::{InterpreterResult, interpreter::EthInterpreter, interpreter_action::FrameInit}, state::{EvmState, LazyEvmState}
 };
 
 /// Custom handler for MyEvm that defines transaction execution behavior.
@@ -36,7 +29,7 @@ impl<EVM> Default for MyHandler<EVM> {
 impl<EVM> Handler for MyHandler<EVM>
 where
     EVM: EvmTr<
-        Context: ContextTr<Journal: JournalTr<State = EvmState>>,
+        Context: ContextTr<Journal: JournalTr<State = LazyEvmState>>,
         Precompiles: PrecompileProvider<EVM::Context, Output = InterpreterResult>,
         Instructions: InstructionProvider<
             Context = EVM::Context,
@@ -63,7 +56,7 @@ impl<EVM> InspectorHandler for MyHandler<EVM>
 where
     EVM: InspectorEvmTr<
         Inspector: Inspector<<<Self as Handler>::Evm as EvmTr>::Context, EthInterpreter>,
-        Context: ContextTr<Journal: JournalTr<State = EvmState>>,
+        Context: ContextTr<Journal: JournalTr<State = LazyEvmState>>,
         Precompiles: PrecompileProvider<EVM::Context, Output = InterpreterResult>,
         Instructions: InstructionProvider<
             Context = EVM::Context,

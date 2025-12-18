@@ -5,7 +5,7 @@ use revm::{
     context_interface::{Block, JournalTr},
     handler::instructions::EthInstructions,
     interpreter::interpreter::EthInterpreter,
-    state::EvmState,
+    state::LazyEvmState,
     Context, Database,
 };
 
@@ -31,7 +31,7 @@ where
     TX: OpTxTr,
     CFG: Cfg<Spec = OpSpecId>,
     DB: Database,
-    JOURNAL: JournalTr<Database = DB, State = EvmState>,
+    JOURNAL: JournalTr<Database = DB, State = LazyEvmState>,
 {
     type Context = Self;
 

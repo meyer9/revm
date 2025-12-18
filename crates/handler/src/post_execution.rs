@@ -72,8 +72,7 @@ pub fn reward_beneficiary<CTX: ContextTr>(
 
     // reward beneficiary
     journal
-        .load_account_mut(block.beneficiary())?
-        .incr_balance(U256::from(coinbase_gas_price * gas.used() as u128));
+        .balance_incr(block.beneficiary(), U256::from(coinbase_gas_price * gas.used() as u128))?;
 
     Ok(())
 }

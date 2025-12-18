@@ -10,13 +10,13 @@ use handler::{
 };
 use interpreter::{interpreter::EthInterpreter, InterpreterResult};
 use primitives::{Address, Bytes};
-use state::EvmState;
+use state::{EvmState, LazyEvmState};
 
 // Implementing InspectorHandler for MainnetHandler.
 impl<EVM, ERROR> InspectorHandler for MainnetHandler<EVM, ERROR, EthFrame<EthInterpreter>>
 where
     EVM: InspectorEvmTr<
-        Context: ContextTr<Journal: JournalTr<State = EvmState>>,
+        Context: ContextTr<Journal: JournalTr<State = LazyEvmState>>,
         Frame = EthFrame<EthInterpreter>,
         Inspector: Inspector<<<Self as Handler>::Evm as EvmTr>::Context, EthInterpreter>,
     >,
@@ -29,7 +29,7 @@ where
 impl<CTX, INSP, INST, PRECOMPILES> InspectEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
-    CTX: ContextSetters + ContextTr<Journal: JournalTr<State = EvmState> + JournalExt>,
+    CTX: ContextSetters + ContextTr<Journal: JournalTr<State = LazyEvmState> + JournalExt>,
     INSP: Inspector<CTX, EthInterpreter>,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
@@ -51,7 +51,7 @@ impl<CTX, INSP, INST, PRECOMPILES> InspectCommitEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
     CTX: ContextSetters
-        + ContextTr<Journal: JournalTr<State = EvmState> + JournalExt, Db: DatabaseCommit>,
+        + ContextTr<Journal: JournalTr<State = LazyEvmState> + JournalExt, Db: DatabaseCommit>,
     INSP: Inspector<CTX, EthInterpreter>,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
@@ -63,7 +63,7 @@ impl<CTX, INSP, INST, PRECOMPILES> InspectSystemCallEvm
     for Evm<CTX, INSP, INST, PRECOMPILES, EthFrame<EthInterpreter>>
 where
     CTX: ContextSetters
-        + ContextTr<Journal: JournalTr<State = EvmState> + JournalExt, Tx: SystemCallTx>,
+        + ContextTr<Journal: JournalTr<State = LazyEvmState> + JournalExt, Tx: SystemCallTx>,
     INSP: Inspector<CTX, EthInterpreter>,
     INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
     PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,

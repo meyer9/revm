@@ -6,7 +6,7 @@
 //! or removal of the storage slot. Check [`JournalEntryTr`] for more details.
 
 use primitives::{Address, StorageKey, StorageValue, KECCAK_EMPTY, PRECOMPILE3, U256};
-use state::{EvmState, TransientStorage};
+use state::{EvmState, LazyEvmState, TransientStorage};
 
 /// Trait for tracking and reverting state changes in the EVM.
 /// Journal entry contains information about state changes that can be reverted.
@@ -81,7 +81,7 @@ pub trait JournalEntryTr {
     /// ```
     fn revert(
         self,
-        state: &mut EvmState,
+        state: &mut LazyEvmState,
         transient_storage: Option<&mut TransientStorage>,
         is_spurious_dragon_enabled: bool,
     );
@@ -213,6 +213,15 @@ pub enum JournalEntry {
         /// Address of account that had its code changed.
         address: Address,
     },
+    /// Balance incremented
+    /// Action: Increment balance
+    /// Revert: Decrement balance
+    BalanceIncremented {
+        /// Balance to be increment account by.
+        balance: U256,
+        /// Address of account that received the balance.
+        to: Address,
+    },
 }
 impl JournalEntryTr for JournalEntry {
     fn account_warmed(address: Address) -> Self {
@@ -289,20 +298,20 @@ impl JournalEntryTr for JournalEntry {
 
     fn revert(
         self,
-        state: &mut EvmState,
+        state: &mut LazyEvmState,
         transient_storage: Option<&mut TransientStorage>,
         is_spurious_dragon_enabled: bool,
     ) {
         match self {
             JournalEntry::AccountWarmed { address } => {
-                state.get_mut(&address).unwrap().mark_cold();
+                state.loaded_state.get_mut(&address).unwrap().mark_cold();
             }
             JournalEntry::AccountTouched { address } => {
                 if is_spurious_dragon_enabled && address == PRECOMPILE3 {
                     return;
                 }
                 // remove touched status
-                state.get_mut(&address).unwrap().unmark_touch();
+                state.loaded_state.get_mut(&address).unwrap().unmark_touch();
             }
             JournalEntry::AccountDestroyed {
                 address,
@@ -310,7 +319,7 @@ impl JournalEntryTr for JournalEntry {
                 destroyed_status,
                 had_balance,
             } => {
-                let account = state.get_mut(&address).unwrap();
+                let account = state.loaded_state.get_mut(&address).unwrap();
                 // set previous state of selfdestructed flag, as there could be multiple
                 // selfdestructs in one transaction.
                 match destroyed_status {
@@ -328,7 +337,7 @@ impl JournalEntryTr for JournalEntry {
                 account.info.balance += had_balance;
 
                 if address != target {
-                    let target = state.get_mut(&target).unwrap();
+                    let target = state.loaded_state.get_mut(&target).unwrap();
                     target.info.balance -= had_balance;
                 }
             }
@@ -336,24 +345,33 @@ impl JournalEntryTr for JournalEntry {
                 address,
                 old_balance,
             } => {
-                let account = state.get_mut(&address).unwrap();
+                let account = state.loaded_state.get_mut(&address).unwrap();
                 account.info.balance = old_balance;
             }
             JournalEntry::BalanceTransfer { from, to, balance } => {
                 // we don't need to check overflow and underflow when adding and subtracting the balance.
-                let from = state.get_mut(&from).unwrap();
+                let from = state.loaded_state.get_mut(&from).unwrap();
                 from.info.balance += balance;
-                let to = state.get_mut(&to).unwrap();
+                let to = state.loaded_state.get_mut(&to).unwrap();
                 to.info.balance -= balance;
             }
             JournalEntry::NonceChange { address } => {
-                state.get_mut(&address).unwrap().info.nonce -= 1;
+                state.loaded_state.get_mut(&address).unwrap().info.nonce -= 1;
+            }
+            JournalEntry::BalanceIncremented { balance, to } => {
+                // if there is a pre-existing balance increment, add it to the existing balance increment
+                // otherwise, if the account must exist in loaded_state, subtract the balance from the balance
+                if let Some(balance_increment) = state.pending_balance_increments.get_mut(&to).filter(|b| (**b).gt(&balance)) {
+                    *balance_increment = balance_increment.saturating_sub(balance);
+                } else {
+                    state.loaded_state.get_mut(&to).unwrap().info.balance -= balance;
+                }
             }
             JournalEntry::AccountCreated {
                 address,
                 is_created_globally,
             } => {
-                let account = &mut state.get_mut(&address).unwrap();
+                let account = &mut state.loaded_state.get_mut(&address).unwrap();
                 account.unmark_created_locally();
                 if is_created_globally {
                     account.unmark_created();
@@ -363,7 +381,7 @@ impl JournalEntryTr for JournalEntry {
             }
             JournalEntry::StorageWarmed { address, key } => {
                 state
-                    .get_mut(&address)
+                    .loaded_state.get_mut(&address)
                     .unwrap()
                     .storage
                     .get_mut(&key)
@@ -376,6 +394,7 @@ impl JournalEntryTr for JournalEntry {
                 had_value,
             } => {
                 state
+                    .loaded_state
                     .get_mut(&address)
                     .unwrap()
                     .storage
@@ -401,7 +420,7 @@ impl JournalEntryTr for JournalEntry {
                 }
             }
             JournalEntry::CodeChange { address } => {
-                let acc = state.get_mut(&address).unwrap();
+                let acc = state.loaded_state.get_mut(&address).unwrap();
                 acc.info.code_hash = KECCAK_EMPTY;
                 acc.info.code = None;
             }
